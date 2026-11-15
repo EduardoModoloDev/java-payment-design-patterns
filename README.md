@@ -27,14 +27,33 @@ do domínio.
 Pré-requisito: JDK 21 ou superior. O Maven Wrapper já está incluído, não é preciso instalar o Maven.
 
 ```bash
+# compila e roda os testes
 ./mvnw clean test
+
+# executa a demonstração (Main)
+./mvnw -q compile exec:java
 ```
 
 No Windows, use `mvnw.cmd` no lugar de `./mvnw`.
 
+A demonstração da Fase 1 cria contas em memória e roda três cenários: Pix aprovado, cartão em 6x
+(debitando o limite) e boleto gerado como `PENDENTE`.
+
+## Estrutura
+
+```
+src/main/java/io/github/eduardomodolodev/pagamentos/
+├── Main.java        → demonstração em Java puro
+├── domain/          → Conta, Pagamento (+Builder), ResultadoPagamento, enums
+├── repository/      → interfaces + implementações em memória
+├── strategy/        → ProcessadorPagamento e Pix/Cartao/BoletoProcessador
+├── factory/         → ProcessadorFactory (registro por tipo)
+└── service/         → PagamentoService (Facade)
+```
+
 ## Roadmap
 
-- [ ] Fase 1 — Núcleo em Java puro (Strategy + Factory + Builder)
+- [x] Fase 1 — Núcleo em Java puro (Strategy + Factory + Builder) — `v0.1.0`
 - [ ] Fase 2 — Validações e Decorators (Chain of Responsibility + Decorator)
 - [ ] Fase 3 — Observer, confirmação de boleto e testes
 - [ ] Fase 4 — API REST com Spring Boot (opcional)
