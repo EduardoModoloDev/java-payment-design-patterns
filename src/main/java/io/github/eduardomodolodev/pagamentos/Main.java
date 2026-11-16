@@ -7,8 +7,10 @@ import io.github.eduardomodolodev.pagamentos.domain.TipoPagamento;
 import io.github.eduardomodolodev.pagamentos.factory.ProcessadorFactory;
 import io.github.eduardomodolodev.pagamentos.repository.ContaRepository;
 import io.github.eduardomodolodev.pagamentos.repository.ContaRepositoryEmMemoria;
+import io.github.eduardomodolodev.pagamentos.repository.PagamentoRepository;
 import io.github.eduardomodolodev.pagamentos.repository.PagamentoRepositoryEmMemoria;
 import io.github.eduardomodolodev.pagamentos.service.PagamentoService;
+import io.github.eduardomodolodev.pagamentos.validation.CadeiaValidadores;
 
 import java.math.BigDecimal;
 import java.text.NumberFormat;
@@ -31,8 +33,9 @@ public class Main {
 
         // Montagem manual das dependências (sem Singleton, sem framework).
         ContaRepository contas = new ContaRepositoryEmMemoria();
-        PagamentoService service = new PagamentoService(
-                contas, new PagamentoRepositoryEmMemoria(), new ProcessadorFactory(clock));
+        PagamentoRepository pagamentos = new PagamentoRepositoryEmMemoria();
+        PagamentoService service = new PagamentoService(contas, pagamentos, new ProcessadorFactory(clock),
+                CadeiaValidadores.padrao(pagamentos, clock), clock);
 
         Conta maria = contas.salvar(new Conta("CONTA-001", "Maria Silva",
                 new BigDecimal("3000.00"), new BigDecimal("5000.00")));

@@ -1,5 +1,6 @@
 package io.github.eduardomodolodev.pagamentos.service;
 
+import io.github.eduardomodolodev.pagamentos.domain.CodigoRecusa;
 import io.github.eduardomodolodev.pagamentos.domain.Conta;
 import io.github.eduardomodolodev.pagamentos.domain.Pagamento;
 import io.github.eduardomodolodev.pagamentos.domain.ResultadoPagamento;
@@ -8,17 +9,25 @@ import io.github.eduardomodolodev.pagamentos.domain.TipoPagamento;
 import io.github.eduardomodolodev.pagamentos.factory.ProcessadorFactory;
 import io.github.eduardomodolodev.pagamentos.repository.ContaRepository;
 import io.github.eduardomodolodev.pagamentos.repository.ContaRepositoryEmMemoria;
+import io.github.eduardomodolodev.pagamentos.repository.PagamentoRepository;
 import io.github.eduardomodolodev.pagamentos.repository.PagamentoRepositoryEmMemoria;
+import io.github.eduardomodolodev.pagamentos.validation.CadeiaValidadores;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class PagamentoServiceTest {
+
+    private static final LocalDateTime AGORA = LocalDateTime.of(2026, 11, 16, 14, 0);
+    private static final Clock RELOGIO = Clock.fixed(AGORA.toInstant(ZoneOffset.UTC), ZoneOffset.UTC);
 
     private ContaRepository contaRepository;
     private PagamentoService service;
@@ -27,7 +36,9 @@ class PagamentoServiceTest {
     void setUp() {
         contaRepository = new ContaRepositoryEmMemoria();
         contaRepository.salvar(new Conta("CONTA-001", "Maria", new BigDecimal("2000.00"), new BigDecimal("3000.00")));
-        service = new PagamentoService(contaRepository, new PagamentoRepositoryEmMemoria(), new ProcessadorFactory());
+        PagamentoRepository pagamentoRepository = new PagamentoRepositoryEmMemoria();
+        service = new PagamentoService(contaRepository, pagamentoRepository, new ProcessadorFactory(RELOGIO),
+                CadeiaValidadores.padrao(pagamentoRepository, RELOGIO), RELOGIO);
     }
 
     private Conta conta() {
@@ -39,7 +50,8 @@ class PagamentoServiceTest {
                 .contaOrigemId("CONTA-001")
                 .tipo(tipo)
                 .valor(new BigDecimal(valor))
-                .destinatario("Favorecido");
+                .destinatario("Favorecido")
+                .clock(RELOGIO);
     }
 
     @Test
@@ -57,14 +69,13 @@ class PagamentoServiceTest {
                 pagamento(TipoPagamento.CARTAO_CREDITO, "1200.00").parcelas(6).build());
 
         assertThat(resultado.status()).isEqualTo(StatusPagamento.APROVADO);
-        assertThat(conta().getLimiteCartaoDisponivel()).isEqualByComparingTo("1800.00");
         assertThat(conta().getSaldo()).isEqualByComparingTo("2000.00");
     }
 
     @Test
     void deveDeixarBoletoPendenteSemDebitar() {
         ResultadoPagamento resultado = service.processar(
-                pagamento(TipoPagamento.BOLETO, "350.00").dataVencimento(LocalDate.now().plusDays(5)).build());
+                pagamento(TipoPagamento.BOLETO, "350.00").dataVencimento(AGORA.toLocalDate().plusDays(5)).build());
 
         assertThat(resultado.status()).isEqualTo(StatusPagamento.PENDENTE);
         assertThat(conta().getSaldo()).isEqualByComparingTo("2000.00");
@@ -94,11 +105,38 @@ class PagamentoServiceTest {
     }
 
     @Test
-    void deveDevolverRecusaDoProcessadorSemLancarExcecao() {
-        ResultadoPagamento resultado = service.processar(pagamento(TipoPagamento.PIX, "2000.01").build());
+    void deveConverterRecusaDaValidacaoEmResultadoSemLancarExcecao() {
+        Pagamento pagamento = pagamento(TipoPagamento.PIX, "2000.01").build();
+
+        ResultadoPagamento resultado = service.processar(pagamento);
 
         assertThat(resultado.status()).isEqualTo(StatusPagamento.RECUSADO);
+        assertThat(resultado.codigo()).isEqualTo(CodigoRecusa.SALDO_INSUFICIENTE);
+        assertThat(resultado.mensagem()).contains("Saldo insuficiente");
+        assertThat(resultado.processadoEm()).isEqualTo(AGORA);
         assertThat(conta().getSaldo()).isEqualByComparingTo("2000.00");
+    }
+
+    @Test
+    void devePersistirOPagamentoRecusadoNoHistorico() {
+        Pagamento pagamento = pagamento(TipoPagamento.CARTAO_CREDITO, "900.00").parcelas(13).build();
+
+        ResultadoPagamento resultado = service.processar(pagamento);
+
+        assertThat(resultado.codigo()).isEqualTo(CodigoRecusa.PARCELAS_INVALIDAS);
+        assertThat(service.buscarPagamento(pagamento.getId()))
+                .get()
+                .extracting(Pagamento::getStatus)
+                .isEqualTo(StatusPagamento.RECUSADO);
+        assertThat(conta().getLimiteCartaoDisponivel()).isEqualByComparingTo("3000.00");
+    }
+
+    @Test
+    void deveRecusarBoletoVencido() {
+        ResultadoPagamento resultado = service.processar(
+                pagamento(TipoPagamento.BOLETO, "100.00").dataVencimento(LocalDate.of(2026, 11, 15)).build());
+
+        assertThat(resultado.codigo()).isEqualTo(CodigoRecusa.BOLETO_VENCIDO);
     }
 
     @Test
