@@ -7,80 +7,143 @@ import io.github.eduardomodolodev.pagamentos.domain.TipoPagamento;
 import io.github.eduardomodolodev.pagamentos.factory.ProcessadorFactory;
 import io.github.eduardomodolodev.pagamentos.repository.ContaRepository;
 import io.github.eduardomodolodev.pagamentos.repository.ContaRepositoryEmMemoria;
+import io.github.eduardomodolodev.pagamentos.repository.PagamentoRepository;
 import io.github.eduardomodolodev.pagamentos.repository.PagamentoRepositoryEmMemoria;
 import io.github.eduardomodolodev.pagamentos.service.PagamentoService;
+import io.github.eduardomodolodev.pagamentos.validation.CadeiaValidadores;
 
 import java.math.BigDecimal;
 import java.text.NumberFormat;
 import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Locale;
 
 /**
  * Demonstração do simulador em Java puro.
  *
- * <p>Fase 1: cenários 1 (Pix), 3 (cartão) e 5 (boleto) da especificação.
- * Taxas, juros e cashback entram na fase 2, com os decorators.
+ * <p>Roda os cenários da especificação que já são suportados (o 6,
+ * {@code confirmarBoleto}, chega na fase 3). Um relógio simulado controla o
+ * horário, para que os cenários não dependam da hora real.
  */
 public class Main {
 
     private static final NumberFormat REAIS = NumberFormat.getCurrencyInstance(Locale.of("pt", "BR"));
 
     public static void main(String[] args) {
-        Clock clock = Clock.systemDefaultZone();
+        ZoneId zona = ZoneId.systemDefault();
+        RelogioSimulado relogio = new RelogioSimulado(LocalDateTime.of(2026, 11, 16, 14, 0), zona);
+        Clock noite = Clock.fixed(LocalDateTime.of(2026, 11, 16, 22, 0).atZone(zona).toInstant(), zona);
 
         // Montagem manual das dependências (sem Singleton, sem framework).
         ContaRepository contas = new ContaRepositoryEmMemoria();
-        PagamentoService service = new PagamentoService(
-                contas, new PagamentoRepositoryEmMemoria(), new ProcessadorFactory(clock));
+        PagamentoRepository pagamentos = new PagamentoRepositoryEmMemoria();
+        PagamentoService service = novoService(contas, pagamentos, relogio);
+        PagamentoService serviceNoturno = novoService(contas, pagamentos, noite);
 
         Conta maria = contas.salvar(new Conta("CONTA-001", "Maria Silva",
                 new BigDecimal("3000.00"), new BigDecimal("5000.00")));
-        contas.salvar(new Conta("CONTA-002", "João Souza",
+        Conta joao = contas.salvar(new Conta("CONTA-002", "João Souza",
                 new BigDecimal("800.00"), new BigDecimal("2000.00")));
+        Conta ana = contas.salvar(new Conta("CONTA-003", "Ana Lima",
+                new BigDecimal("10000.00"), new BigDecimal("5000.00")));
+        Conta carlos = contas.salvar(new Conta("CONTA-004", "Carlos Melo",
+                new BigDecimal("10000.00"), new BigDecimal("5000.00")));
 
-        titulo("Simulador de Pagamentos — Fase 1 (Strategy + Factory + Builder + Facade)");
-        System.out.println("Conta inicial: " + descrever(maria));
+        titulo("Simulador de Pagamentos — Fase 2 (Chain of Responsibility + Decorator)");
+        System.out.println("Contas iniciais:");
+        for (Conta conta : new Conta[]{maria, joao, ana, carlos}) {
+            System.out.println("  " + descrever(conta));
+        }
 
         executar("Cenário 1 — Pix de R$ 200,00 com saldo suficiente", service,
-                Pagamento.builder()
-                        .contaOrigemId("CONTA-001")
-                        .tipo(TipoPagamento.PIX)
-                        .valor(new BigDecimal("200.00"))
-                        .destinatario("joao@pix.com")
-                        .clock(clock)
-                        .build());
+                pix("CONTA-001", "200.00", "joao@pix.com", relogio));
 
+        relogio.avancar(Duration.ofMinutes(1));
+        executar("Cenário 2 — Pix de R$ 1.500,00 às 22h", serviceNoturno,
+                pix("CONTA-002", "1500.00", "loja@pix.com", noite));
+
+        relogio.avancar(Duration.ofMinutes(1));
         executar("Cenário 3 — Cartão de R$ 1.200,00 em 6x", service,
-                Pagamento.builder()
-                        .contaOrigemId("CONTA-001")
-                        .tipo(TipoPagamento.CARTAO_CREDITO)
-                        .valor(new BigDecimal("1200.00"))
-                        .destinatario("Loja do Zé")
-                        .parcelas(6)
-                        .clock(clock)
-                        .build());
+                cartao("CONTA-001", "1200.00", 6, relogio));
 
+        relogio.avancar(Duration.ofMinutes(1));
+        executar("Cenário 4 — Cartão de R$ 900,00 em 13x", service,
+                cartao("CONTA-001", "900.00", 13, relogio));
+
+        relogio.avancar(Duration.ofMinutes(1));
         executar("Cenário 5 — Boleto de R$ 350,00 com vencimento futuro", service,
-                Pagamento.builder()
-                        .contaOrigemId("CONTA-001")
-                        .tipo(TipoPagamento.BOLETO)
-                        .valor(new BigDecimal("350.00"))
-                        .destinatario("Companhia de Energia")
-                        .dataVencimento(LocalDate.now(clock).plusDays(10))
-                        .clock(clock)
-                        .build());
+                boleto("CONTA-001", "350.00", LocalDate.now(relogio).plusDays(10), relogio));
 
-        titulo("Situação final");
-        System.out.println(descrever(maria));
-        System.out.println();
-        System.out.println("Histórico da CONTA-001:");
-        service.listarPagamentos("CONTA-001").forEach(pagamento ->
-                System.out.printf("  - %-15s %12s  %-9s %s%n",
-                        pagamento.getTipo(),
-                        REAIS.format(pagamento.getValor()),
-                        pagamento.getStatus(),
-                        pagamento.getDestinatario()));
+        relogio.avancar(Duration.ofMinutes(1));
+        executar("Cenário 7 — Boleto vencido", service,
+                boleto("CONTA-001", "120.00", LocalDate.now(relogio).minusDays(1), relogio));
+
+        relogio.avancar(Duration.ofMinutes(1));
+        executar("Cenário 8 — Pix maior que o saldo", service,
+                pix("CONTA-002", "1000.00", "amigo@pix.com", relogio));
+
+        titulo("Cenário 9 — 5 pagamentos seguidos em poucos segundos (CONTA-003)");
+        for (int i = 1; i <= 6; i++) {
+            relogio.avancar(Duration.ofSeconds(10));
+            ResultadoPagamento resultado = service.processar(
+                    pix("CONTA-003", "50.00", "cafe@pix.com", relogio));
+            System.out.printf("  %dº Pix de R$ 50,00 -> %s%n", i, resumir(resultado));
+        }
+
+        relogio.avancar(Duration.ofMinutes(5));
+        titulo("Cenário 10 — Pagamentos acumulados passando de R$ 5.000,00 no dia (CONTA-004)");
+        for (String valor : new String[]{"2000.00", "2000.00", "1500.00"}) {
+            relogio.avancar(Duration.ofMinutes(1));
+            ResultadoPagamento resultado = service.processar(
+                    pix("CONTA-004", valor, "fornecedor@pix.com", relogio));
+            System.out.printf("  Pix de %s -> %s%n", formatar(new BigDecimal(valor)), resumir(resultado));
+        }
+
+        titulo("Situação final das contas");
+        for (Conta conta : new Conta[]{maria, joao, ana, carlos}) {
+            System.out.println("  " + descrever(conta));
+        }
+    }
+
+    private static PagamentoService novoService(ContaRepository contas, PagamentoRepository pagamentos, Clock clock) {
+        return new PagamentoService(contas, pagamentos, new ProcessadorFactory(clock),
+                CadeiaValidadores.padrao(pagamentos, clock), clock);
+    }
+
+    private static Pagamento pix(String conta, String valor, String chave, Clock clock) {
+        return Pagamento.builder()
+                .contaOrigemId(conta)
+                .tipo(TipoPagamento.PIX)
+                .valor(new BigDecimal(valor))
+                .destinatario(chave)
+                .clock(clock)
+                .build();
+    }
+
+    private static Pagamento cartao(String conta, String valor, int parcelas, Clock clock) {
+        return Pagamento.builder()
+                .contaOrigemId(conta)
+                .tipo(TipoPagamento.CARTAO_CREDITO)
+                .valor(new BigDecimal(valor))
+                .destinatario("Loja do Zé")
+                .parcelas(parcelas)
+                .clock(clock)
+                .build();
+    }
+
+    private static Pagamento boleto(String conta, String valor, LocalDate vencimento, Clock clock) {
+        return Pagamento.builder()
+                .contaOrigemId(conta)
+                .tipo(TipoPagamento.BOLETO)
+                .valor(new BigDecimal(valor))
+                .destinatario("Companhia de Energia")
+                .dataVencimento(vencimento)
+                .clock(clock)
+                .build();
     }
 
     private static void executar(String cenario, PagamentoService service, Pagamento pagamento) {
@@ -89,20 +152,62 @@ public class Main {
         System.out.println("Status ....: " + resultado.status()
                 + (resultado.codigo() == null ? "" : " (" + resultado.codigo() + ")"));
         System.out.println("Mensagem ..: " + resultado.mensagem());
-        System.out.println("Valor .....: " + REAIS.format(resultado.valor()));
-        System.out.println("Taxa ......: " + REAIS.format(resultado.taxa()));
-        System.out.println("Total .....: " + REAIS.format(resultado.total()));
-        System.out.println("Cashback ..: " + REAIS.format(resultado.cashback()));
+        System.out.println("Valor .....: " + formatar(resultado.valor()));
+        System.out.println("Taxa ......: " + formatar(resultado.taxa()));
+        System.out.println("Total .....: " + formatar(resultado.total()));
+        System.out.println("Cashback ..: " + formatar(resultado.cashback()));
+    }
+
+    private static String resumir(ResultadoPagamento resultado) {
+        return resultado.codigo() == null
+                ? resultado.status().name()
+                : resultado.status() + " (" + resultado.codigo() + ")";
     }
 
     private static String descrever(Conta conta) {
-        return "%s (%s) — saldo %s, limite do cartão %s".formatted(
+        return "%s (%s): saldo %s, limite do cartão %s".formatted(
                 conta.getId(), conta.getTitular(),
-                REAIS.format(conta.getSaldo()), REAIS.format(conta.getLimiteCartaoDisponivel()));
+                formatar(conta.getSaldo()), formatar(conta.getLimiteCartaoDisponivel()));
+    }
+
+    /** Formata em reais trocando o espaço não separável por um espaço comum (melhor em qualquer console). */
+    private static String formatar(BigDecimal valor) {
+        return REAIS.format(valor).replace(' ', ' ');
     }
 
     private static void titulo(String texto) {
         System.out.println();
         System.out.println("=== " + texto + " ===");
+    }
+
+    /** Relógio controlável para a demonstração: começa num horário fixo e avança quando pedido. */
+    private static final class RelogioSimulado extends Clock {
+
+        private final ZoneId zona;
+        private Instant agora;
+
+        RelogioSimulado(LocalDateTime inicio, ZoneId zona) {
+            this.zona = zona;
+            this.agora = inicio.atZone(zona).toInstant();
+        }
+
+        void avancar(Duration duracao) {
+            agora = agora.plus(duracao);
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return zona;
+        }
+
+        @Override
+        public Clock withZone(ZoneId novaZona) {
+            return Clock.fixed(agora, novaZona);
+        }
+
+        @Override
+        public Instant instant() {
+            return agora;
+        }
     }
 }
