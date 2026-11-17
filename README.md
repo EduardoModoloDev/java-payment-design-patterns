@@ -1,13 +1,16 @@
 # Simulador de Pagamentos — Design Patterns em Java
 
+[![CI](https://github.com/EduardoModoloDev/java-payment-design-patterns/actions/workflows/ci.yml/badge.svg)](https://github.com/EduardoModoloDev/java-payment-design-patterns/actions/workflows/ci.yml)
 ![Java](https://img.shields.io/badge/Java-21-orange?logo=openjdk)
+![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5-6DB33F?logo=springboot)
 ![Maven](https://img.shields.io/badge/build-Maven-C71A36?logo=apachemaven)
 ![JUnit 5](https://img.shields.io/badge/testes-JUnit%205-25A162?logo=junit5)
-![Versão](https://img.shields.io/badge/vers%C3%A3o-1.0.0-blue)
+![Versão](https://img.shields.io/badge/vers%C3%A3o-1.1.0-blue)
 
-Simulador de processamento de pagamentos (**Pix**, **cartão de crédito** e **boleto**) de uma conta bancária fictícia,
-escrito em Java 21 puro. Ele aplica **7 padrões de projeto**, e cada um existe porque resolve um problema concreto do
-domínio, não só para aparecer no código.
+Simulador de processamento de pagamentos (**Pix**, **cartão de crédito** e **boleto**) de uma conta bancária fictícia.
+O núcleo é escrito em **Java 21 puro** e aplica **7 padrões de projeto**, cada um resolvendo um problema concreto do
+domínio. Por cima dele, uma **API REST com Spring Boot** e Swagger expõe o simulador sem que o núcleo dependa do
+framework.
 
 > Projeto final do desafio de **Padrões de Projeto** do curso de Java (Itaú).
 
@@ -161,12 +164,15 @@ Pré-requisito: JDK 21 ou superior. O Maven Wrapper já está incluído, não é
 # compila e roda os testes
 ./mvnw clean test
 
-# executa a demonstração (Main)
+# demonstração em Java puro (Main): roda os 10 cenários no console
 ./mvnw -q compile exec:java
 
-# ou gera o jar e executa
+# API REST (Spring Boot) em http://localhost:8080
+./mvnw spring-boot:run
+
+# ou gera o jar da API e executa
 ./mvnw -q package -DskipTests
-java -jar target/java-payment-design-patterns-1.0.0.jar
+java -jar target/java-payment-design-patterns-1.1.0.jar
 ```
 
 No Windows, use `mvnw.cmd` no lugar de `./mvnw`.
@@ -188,6 +194,95 @@ A demonstração usa um relógio simulado e roda os 10 cenários da especificaç
 
 Os mesmos 10 cenários também são verificados automaticamente em
 [`CenariosEspecificacaoTest`](src/test/java/io/github/eduardomodolodev/pagamentos/service/CenariosEspecificacaoTest.java).
+
+## API REST
+
+Com a API no ar, a documentação interativa fica em **http://localhost:8080/swagger-ui.html** (o contrato OpenAPI em
+`/v3/api-docs`). A aplicação já sobe com as contas de demonstração `CONTA-001`, `CONTA-002` e `CONTA-003`.
+
+| Método | Rota | Descrição |
+|---|---|---|
+| `POST` | `/api/pagamentos` | Cria e processa um pagamento |
+| `GET` | `/api/pagamentos/{id}` | Consulta um pagamento |
+| `POST` | `/api/pagamentos/{id}/confirmar` | Confirma um boleto pendente |
+| `GET` | `/api/contas/{id}` | Consulta saldo, limites e dados da conta |
+| `GET` | `/api/contas/{id}/pagamentos` | Histórico de pagamentos da conta |
+
+**Convenções HTTP**
+
+| Status | Quando |
+|---|---|
+| `201 Created` | Pagamento processado, **inclusive recusado por regra de negócio**: `status` e `codigo` no corpo dizem o que houve |
+| `200 OK` | Consultas e confirmação de boleto |
+| `400 Bad Request` | JSON inválido ou campos obrigatórios ausentes |
+| `404 Not Found` | Conta ou pagamento inexistente |
+| `409 Conflict` | Confirmar um pagamento que não é um boleto pendente |
+
+Os erros seguem o formato padrão [Problem Details](https://www.rfc-editor.org/rfc/rfc9457) (`application/problem+json`).
+
+### Exemplos com curl
+
+Cartão de R$ 1.200,00 em 6x:
+
+```bash
+curl -i -X POST http://localhost:8080/api/pagamentos \
+  -H "Content-Type: application/json" \
+  -d '{"contaOrigemId":"CONTA-001","tipo":"CARTAO_CREDITO","valor":1200.00,"destinatario":"Loja do Zé","parcelas":6}'
+```
+
+```http
+HTTP/1.1 201 Created
+Location: http://localhost:8080/api/pagamentos/b7d9c1e2-5a34-4c8e-9f21-3a6d8e0f1b22
+
+{
+  "pagamentoId": "b7d9c1e2-5a34-4c8e-9f21-3a6d8e0f1b22",
+  "status": "APROVADO",
+  "codigo": null,
+  "mensagem": "Pagamento no cartão aprovado em 6x",
+  "valor": 1200.00,
+  "taxa": 84.00,
+  "total": 1284.00,
+  "cashback": 12.00,
+  "processadoEm": "2026-11-17T14:00:00"
+}
+```
+
+Recusa de negócio (13 parcelas) também responde `201`, com o motivo no corpo:
+
+```bash
+curl -X POST http://localhost:8080/api/pagamentos \
+  -H "Content-Type: application/json" \
+  -d '{"contaOrigemId":"CONTA-001","tipo":"CARTAO_CREDITO","valor":900.00,"destinatario":"Loja do Zé","parcelas":13}'
+# {"status":"RECUSADO","codigo":"PARCELAS_INVALIDAS", ...}
+```
+
+Boleto e confirmação:
+
+```bash
+curl -X POST http://localhost:8080/api/pagamentos \
+  -H "Content-Type: application/json" \
+  -d '{"contaOrigemId":"CONTA-001","tipo":"BOLETO","valor":350.00,"destinatario":"Companhia de Energia","dataVencimento":"2026-12-10"}'
+# {"pagamentoId":"<id>","status":"PENDENTE","taxa":3.50,"total":353.50, ...}
+
+curl -X POST http://localhost:8080/api/pagamentos/<id>/confirmar
+# {"status":"APROVADO","mensagem":"Boleto pago","total":353.50, ...}
+```
+
+Conta e histórico:
+
+```bash
+curl http://localhost:8080/api/contas/CONTA-001
+# {"id":"CONTA-001","titular":"Maria Silva","saldo":2646.50,"limiteCartaoDisponivel":3716.00,"limiteDiario":5000.00}
+
+curl http://localhost:8080/api/contas/CONTA-001/pagamentos
+```
+
+Erro de requisição (campos ausentes):
+
+```bash
+curl -X POST http://localhost:8080/api/pagamentos -H "Content-Type: application/json" -d '{}'
+# 400 {"title":"Requisição inválida","campos":{"contaOrigemId":"é obrigatório","tipo":"é obrigatório", ...}}
+```
 
 ## Como adicionar um novo meio de pagamento
 
@@ -217,6 +312,12 @@ O mesmo vale para o resto: uma taxa nova é um `ProcessadorDecorator`, uma notif
   `SALDO_INSUFICIENTE` / `LIMITE_CARTAO_INSUFICIENTE`.
 - **Repositórios atrás de interfaces:** as implementações em memória podem ser trocadas por JPA sem tocar na regra de
   negócio.
+- **Regra de ouro da arquitetura:** o Spring só aparece em `api/` e `config/`. O núcleo não tem nenhuma anotação de
+  framework; a `NucleoConfig` monta os mesmos objetos que o `Main` monta à mão. O
+  [`ArquiteturaTest`](src/test/java/io/github/eduardomodolodev/pagamentos/ArquiteturaTest.java) quebra o build se algum
+  pacote do núcleo importar Spring, Jakarta ou Swagger.
+- **Bean Validation só para estrutura:** campos ausentes viram `400`; regras de negócio (valor positivo, parcelas,
+  vencimento) continuam na cadeia de validadores e viram pagamento `RECUSADO`, igual no Java puro.
 - **Padrões deliberadamente não usados:** Singleton (dificulta testes; a injeção manual de dependências no `Main`
   resolve) e Template Method (não há um algoritmo com esqueleto fixo que justifique). Saber quando **não** usar um padrão
   também é parte do projeto.
@@ -233,8 +334,11 @@ src/main/java/io/github/eduardomodolodev/pagamentos/
 ├── factory/         → ProcessadorFactory (registro por tipo, já com decorators)
 ├── validation/      → Validador (base), 5 validadores, CadeiaValidadores, ValidacaoException
 ├── observer/        → PagamentoListener, Email/Sms/AuditoriaListener
-└── service/         → PagamentoService (Facade)
-src/test/java/...    → testes espelhando os pacotes acima
+├── service/         → PagamentoService (Facade)
+├── api/             → controllers, DTOs e tratamento global de erros (Spring)
+└── config/          → SimuladorApiApplication, NucleoConfig e OpenApiConfig (Spring)
+src/test/java/...    → testes espelhando os pacotes acima, incluindo MockMvc e o teste de arquitetura
+.github/workflows/   → CI no GitHub Actions (build e testes com Java 21)
 ```
 
 ## Roadmap
@@ -242,7 +346,7 @@ src/test/java/...    → testes espelhando os pacotes acima
 - [x] Fase 1 — Núcleo em Java puro (Strategy + Factory + Builder) — `v0.1.0`
 - [x] Fase 2 — Validações e Decorators (Chain of Responsibility + Decorator) — `v0.2.0`
 - [x] Fase 3 — Observer, confirmação de boleto e testes de ponta a ponta — `v1.0.0`
-- [ ] Fase 4 — API REST com Spring Boot e Swagger (opcional)
+- [x] Fase 4 — API REST com Spring Boot, Swagger e CI — `v1.1.0`
 
 Evoluções futuras:
 
@@ -250,7 +354,9 @@ Evoluções futuras:
 - Estorno de pagamentos com o padrão **Command** (`desfazer()`).
 - Ciclo de vida do pagamento como máquina de estados (padrão **State**).
 - Notificações assíncronas (eventos/filas).
-- Dockerfile e pipeline de CI no GitHub Actions rodando os testes.
+- Autenticação com JWT.
+- Dockerfile para subir a API em contêiner.
+- Migração para o Spring Boot 4 (a especificação pede a linha 3.x).
 
 A especificação completa está em [docs/ESPECIFICACAO.md](docs/ESPECIFICACAO.md).
 
