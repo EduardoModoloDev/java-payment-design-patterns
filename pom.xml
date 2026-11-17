@@ -13,7 +13,7 @@
 
     <groupId>io.github.eduardomodolodev</groupId>
     <artifactId>java-payment-design-patterns</artifactId>
-    <version>1.0.0</version>
+    <version>1.1.0</version>
     <packaging>jar</packaging>
 
     <name>Simulador de Pagamentos - Design Patterns</name>
