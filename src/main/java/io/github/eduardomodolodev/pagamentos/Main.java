@@ -5,6 +5,9 @@ import io.github.eduardomodolodev.pagamentos.domain.Pagamento;
 import io.github.eduardomodolodev.pagamentos.domain.ResultadoPagamento;
 import io.github.eduardomodolodev.pagamentos.domain.TipoPagamento;
 import io.github.eduardomodolodev.pagamentos.factory.ProcessadorFactory;
+import io.github.eduardomodolodev.pagamentos.observer.AuditoriaListener;
+import io.github.eduardomodolodev.pagamentos.observer.EmailListener;
+import io.github.eduardomodolodev.pagamentos.observer.SmsListener;
 import io.github.eduardomodolodev.pagamentos.repository.ContaRepository;
 import io.github.eduardomodolodev.pagamentos.repository.ContaRepositoryEmMemoria;
 import io.github.eduardomodolodev.pagamentos.repository.PagamentoRepository;
@@ -20,14 +23,15 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.Locale;
 
 /**
  * Demonstração do simulador em Java puro.
  *
- * <p>Roda os cenários da especificação que já são suportados (o 6,
- * {@code confirmarBoleto}, chega na fase 3). Um relógio simulado controla o
- * horário, para que os cenários não dependam da hora real.
+ * <p>Roda os 10 cenários da especificação, com notificações de e-mail, SMS e
+ * auditoria. Um relógio simulado controla o horário, para que os cenários não
+ * dependam da hora real.
  */
 public class Main {
 
@@ -44,6 +48,14 @@ public class Main {
         PagamentoService service = novoService(contas, pagamentos, relogio);
         PagamentoService serviceNoturno = novoService(contas, pagamentos, noite);
 
+        // Observer: os mesmos ouvintes nos dois services.
+        AuditoriaListener auditoria = new AuditoriaListener();
+        for (PagamentoService s : new PagamentoService[]{service, serviceNoturno}) {
+            s.registrarListener(new EmailListener());
+            s.registrarListener(new SmsListener());
+            s.registrarListener(auditoria);
+        }
+
         Conta maria = contas.salvar(new Conta("CONTA-001", "Maria Silva",
                 new BigDecimal("3000.00"), new BigDecimal("5000.00")));
         Conta joao = contas.salvar(new Conta("CONTA-002", "João Souza",
@@ -53,7 +65,7 @@ public class Main {
         Conta carlos = contas.salvar(new Conta("CONTA-004", "Carlos Melo",
                 new BigDecimal("10000.00"), new BigDecimal("5000.00")));
 
-        titulo("Simulador de Pagamentos — Fase 2 (Chain of Responsibility + Decorator)");
+        titulo("Simulador de Pagamentos — Strategy, Factory, Chain, Decorator, Observer, Builder e Facade");
         System.out.println("Contas iniciais:");
         for (Conta conta : new Conta[]{maria, joao, ana, carlos}) {
             System.out.println("  " + descrever(conta));
@@ -75,8 +87,13 @@ public class Main {
                 cartao("CONTA-001", "900.00", 13, relogio));
 
         relogio.avancar(Duration.ofMinutes(1));
-        executar("Cenário 5 — Boleto de R$ 350,00 com vencimento futuro", service,
-                boleto("CONTA-001", "350.00", LocalDate.now(relogio).plusDays(10), relogio));
+        ResultadoPagamento boletoPendente = executar("Cenário 5 — Boleto de R$ 350,00 com vencimento futuro",
+                service, boleto("CONTA-001", "350.00", LocalDate.now(relogio).plusDays(10), relogio));
+
+        relogio.avancar(Duration.ofMinutes(1));
+        titulo("Cenário 6 — confirmarBoleto do cenário 5");
+        imprimir(service.confirmarBoleto(boletoPendente.pagamentoId()));
+        System.out.println("Saldo da CONTA-001 após o boleto: " + formatar(maria.getSaldo()));
 
         relogio.avancar(Duration.ofMinutes(1));
         executar("Cenário 7 — Boleto vencido", service,
@@ -107,6 +124,12 @@ public class Main {
         for (Conta conta : new Conta[]{maria, joao, ana, carlos}) {
             System.out.println("  " + descrever(conta));
         }
+
+        titulo("Auditoria");
+        System.out.printf("%d eventos registrados:%n", auditoria.getEventos().size());
+        auditoria.getEventos().forEach(evento -> System.out.printf("  %s  %-9s %-15s %10s  %-9s %s%n",
+                evento.processadoEm().toLocalTime().format(DateTimeFormatter.ISO_LOCAL_TIME), evento.contaId(), evento.tipo(),
+                evento.total(), evento.status(), evento.codigo() == null ? "" : evento.codigo()));
     }
 
     private static PagamentoService novoService(ContaRepository contas, PagamentoRepository pagamentos, Clock clock) {
@@ -146,9 +169,14 @@ public class Main {
                 .build();
     }
 
-    private static void executar(String cenario, PagamentoService service, Pagamento pagamento) {
+    private static ResultadoPagamento executar(String cenario, PagamentoService service, Pagamento pagamento) {
         titulo(cenario);
         ResultadoPagamento resultado = service.processar(pagamento);
+        imprimir(resultado);
+        return resultado;
+    }
+
+    private static void imprimir(ResultadoPagamento resultado) {
         System.out.println("Status ....: " + resultado.status()
                 + (resultado.codigo() == null ? "" : " (" + resultado.codigo() + ")"));
         System.out.println("Mensagem ..: " + resultado.mensagem());
