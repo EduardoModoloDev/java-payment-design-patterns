@@ -130,6 +130,16 @@ public class PagamentoService {
         listeners.add(Objects.requireNonNull(listener, "listener não pode ser nulo"));
     }
 
+    /**
+     * Consulta uma conta (saldo, limites e dados do titular).
+     *
+     * @throws ContaNaoEncontradaException se a conta não existir
+     */
+    public Conta buscarConta(String contaId) {
+        return contaRepository.buscarPorId(contaId)
+                .orElseThrow(() -> new ContaNaoEncontradaException(contaId));
+    }
+
     public Optional<Pagamento> buscarPagamento(String id) {
         return pagamentoRepository.buscarPorId(id);
     }

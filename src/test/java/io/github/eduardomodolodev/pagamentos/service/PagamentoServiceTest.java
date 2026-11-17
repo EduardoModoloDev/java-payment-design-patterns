@@ -201,6 +201,13 @@ class PagamentoServiceTest {
     }
 
     @Test
+    void deveConsultarUmaConta() {
+        assertThat(service.buscarConta("CONTA-001").getTitular()).isEqualTo("Maria");
+        assertThatThrownBy(() -> service.buscarConta("CONTA-999"))
+                .isInstanceOf(ContaNaoEncontradaException.class);
+    }
+
+    @Test
     void deveLancarErroClaroQuandoAContaNaoExiste() {
         Pagamento pagamento = pagamento(TipoPagamento.PIX, "10.00").contaOrigemId("CONTA-999").build();
 
