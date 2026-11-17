@@ -4,6 +4,7 @@ import io.github.eduardomodolodev.pagamentos.api.dto.PagamentoRequest;
 import io.github.eduardomodolodev.pagamentos.api.dto.PagamentoResponse;
 import io.github.eduardomodolodev.pagamentos.api.dto.ResultadoPagamentoResponse;
 import io.github.eduardomodolodev.pagamentos.domain.ResultadoPagamento;
+import io.github.eduardomodolodev.pagamentos.service.PagamentoNaoEncontradoException;
 import io.github.eduardomodolodev.pagamentos.service.PagamentoService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
@@ -51,11 +52,10 @@ public class PagamentoController {
 
     /** Consulta um pagamento (404 se não existir). */
     @GetMapping("/{id}")
-    public ResponseEntity<PagamentoResponse> buscar(@PathVariable String id) {
+    public PagamentoResponse buscar(@PathVariable String id) {
         return service.buscarPagamento(id)
                 .map(PagamentoResponse::de)
-                .map(ResponseEntity::ok)
-                .orElse(ResponseEntity.notFound().build());
+                .orElseThrow(() -> new PagamentoNaoEncontradoException(id));
     }
 
     /** Confirma (paga) um boleto pendente. */
