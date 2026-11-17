@@ -25,6 +25,8 @@
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <!-- Demonstração em Java puro, executada com ./mvnw exec:java -->
         <main.class>io.github.eduardomodolodev.pagamentos.Main</main.class>
+        <!-- API REST, executada com ./mvnw spring-boot:run ou java -jar -->
+        <start-class>io.github.eduardomodolodev.pagamentos.config.SimuladorApiApplication</start-class>
     </properties>
 
     <dependencies>
