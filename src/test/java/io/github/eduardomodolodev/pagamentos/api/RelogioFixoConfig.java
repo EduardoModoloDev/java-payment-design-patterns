@@ -12,7 +12,8 @@ import java.time.ZoneOffset;
 @TestConfiguration(proxyBeanMethods = false)
 class RelogioFixoConfig {
 
-    static final LocalDateTime AGORA = LocalDateTime.of(2026, 11, 17, 14, 0);
+    /** Com frações de segundo, para conferir que a API as descarta. */
+    static final LocalDateTime AGORA = LocalDateTime.of(2026, 11, 17, 14, 0, 0, 123_456_789);
 
     @Bean
     @Primary

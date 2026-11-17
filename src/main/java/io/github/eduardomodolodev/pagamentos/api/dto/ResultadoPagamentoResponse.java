@@ -31,6 +31,6 @@ public record ResultadoPagamentoResponse(
                 resultado.taxa(),
                 resultado.total(),
                 resultado.cashback(),
-                resultado.processadoEm());
+                Datas.emSegundos(resultado.processadoEm()));
     }
 }

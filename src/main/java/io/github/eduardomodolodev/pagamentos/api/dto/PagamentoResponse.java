@@ -32,7 +32,7 @@ public record PagamentoResponse(
                 pagamento.getDestinatario(),
                 pagamento.getParcelas(),
                 pagamento.getDataVencimento(),
-                pagamento.getCriadoEm(),
+                Datas.emSegundos(pagamento.getCriadoEm()),
                 pagamento.getTaxa(),
                 pagamento.getValorTotal(),
                 pagamento.getCashback(),
