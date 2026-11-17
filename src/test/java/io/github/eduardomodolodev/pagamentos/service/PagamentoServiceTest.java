@@ -139,6 +139,67 @@ class PagamentoServiceTest {
         assertThat(resultado.codigo()).isEqualTo(CodigoRecusa.BOLETO_VENCIDO);
     }
 
+    private Pagamento boletoPendente(String valor) {
+        Pagamento boleto = pagamento(TipoPagamento.BOLETO, valor)
+                .dataVencimento(AGORA.toLocalDate().plusDays(10))
+                .build();
+        assertThat(service.processar(boleto).status()).isEqualTo(StatusPagamento.PENDENTE);
+        return boleto;
+    }
+
+    @Test
+    void confirmarBoletoDeveDebitarValorMaisTaxaEAprovar() {
+        Pagamento boleto = boletoPendente("350.00");
+
+        ResultadoPagamento resultado = service.confirmarBoleto(boleto.getId());
+
+        assertThat(resultado.status()).isEqualTo(StatusPagamento.APROVADO);
+        assertThat(resultado.codigo()).isNull();
+        assertThat(resultado.total()).isEqualByComparingTo("353.50");
+        assertThat(conta().getSaldo()).isEqualByComparingTo("1646.50");
+        assertThat(service.buscarPagamento(boleto.getId()))
+                .get().extracting(Pagamento::getStatus).isEqualTo(StatusPagamento.APROVADO);
+    }
+
+    @Test
+    void confirmarBoletoDeveRecusarQuandoOSaldoNaoCobreValorMaisTaxa() {
+        Pagamento boleto = boletoPendente("1999.00");
+        conta().debitarSaldo(new BigDecimal("1.00")); // saldo 1999,00 < 1999,00 + 3,50
+
+        ResultadoPagamento resultado = service.confirmarBoleto(boleto.getId());
+
+        assertThat(resultado.status()).isEqualTo(StatusPagamento.RECUSADO);
+        assertThat(resultado.codigo()).isEqualTo(CodigoRecusa.SALDO_INSUFICIENTE);
+        assertThat(conta().getSaldo()).isEqualByComparingTo("1999.00");
+    }
+
+    @Test
+    void naoDeveConfirmarOMesmoBoletoDuasVezes() {
+        Pagamento boleto = boletoPendente("100.00");
+        service.confirmarBoleto(boleto.getId());
+
+        assertThatThrownBy(() -> service.confirmarBoleto(boleto.getId()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("PENDENTE");
+        assertThat(conta().getSaldo()).isEqualByComparingTo("1896.50");
+    }
+
+    @Test
+    void naoDeveConfirmarPagamentoQueNaoEBoleto() {
+        Pagamento pix = pagamento(TipoPagamento.PIX, "10.00").build();
+        service.processar(pix);
+
+        assertThatThrownBy(() -> service.confirmarBoleto(pix.getId()))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void confirmarBoletoInexistenteDeveLancarErroClaro() {
+        assertThatThrownBy(() -> service.confirmarBoleto("nao-existe"))
+                .isInstanceOf(PagamentoNaoEncontradoException.class)
+                .hasMessageContaining("nao-existe");
+    }
+
     @Test
     void deveLancarErroClaroQuandoAContaNaoExiste() {
         Pagamento pagamento = pagamento(TipoPagamento.PIX, "10.00").contaOrigemId("CONTA-999").build();
